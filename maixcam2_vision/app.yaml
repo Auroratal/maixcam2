@@ -1,0 +1,25 @@
+id: smart_transport_vision
+name: Transport Vision
+name[zh]: 智能搬运视觉
+version: 0.1.0
+icon: ""
+author: Smart Transport Team
+desc: Step-based vision for MaixCAM2
+desc[zh]: 按比赛步骤组织的 MaixCAM2 视觉程序
+files:
+  - __init__.py
+  - main.py
+  - calibrate.py
+  - camera_io.py
+  - engine.py
+  - settings.py
+  - task.py
+  - transport.py
+  - ui.py
+  - workflow.py
+  - detectors
+  - steps
+  - config
+  - README.md
+  - PROTOCOL.md
+  - ATTRIBUTION.md

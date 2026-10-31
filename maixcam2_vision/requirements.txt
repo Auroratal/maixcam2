@@ -1,0 +1,3 @@
+# 仅电脑调试需要；MaixCAM2 使用系统自带的 cv2 / numpy / maix。
+numpy>=1.23
+opencv-python>=4.5.5

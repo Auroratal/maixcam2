@@ -1,0 +1,25 @@
+{
+  "format_version": 1,
+  "color_space": "OpenCV_HSV",
+  "colors": [
+    {"color_id": 1, "name": "red", "ranges": [
+      {"lower": [0, 123, 112], "upper": [5, 232, 229]},
+      {"lower": [174, 123, 112], "upper": [179, 232, 229]}
+    ]},
+    {"color_id": 2, "name": "yellow", "ranges": [
+      {"lower": [19, 118, 120], "upper": [31, 226, 246]}
+    ]},
+    {"color_id": 3, "name": "blue", "ranges": [
+      {"lower": [105, 129, 48], "upper": [118, 229, 205]}
+    ]},
+    {"color_id": 4, "name": "green", "ranges": [
+      {"lower": [63, 110, 80], "upper": [78, 255, 220]}
+    ]},
+    {"color_id": 5, "name": "black", "ranges": [
+      {"lower": [0, 0, 0], "upper": [179, 130, 60]}
+    ]},
+    {"color_id": 6, "name": "light_blue", "ranges": [
+      {"lower": [94, 130, 100], "upper": [104, 255, 255]}
+    ]}
+  ]
+}

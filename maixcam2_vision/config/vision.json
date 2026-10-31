@@ -1,0 +1,37 @@
+{
+  "camera": {
+    "width": 1280,
+    "height": 720,
+    "fps": 30,
+    "undistort": false,
+    "calibration_file": "camera.yaml"
+  },
+  "qr_confirmations": 3,
+  "result_hz": 5,
+  "observation_timeout_s": 10,
+  "freshness_ms": 500,
+  "turntable_target_px": null,
+  "color_calibrated_ids": [],
+  "calibration_geometry": null,
+  "areas": {
+    "rough": {
+      "reference_calibrated": false,
+      "ring_order": null,
+      "stacking_calibrated": false
+    },
+    "storage": {
+      "reference_calibrated": false,
+      "ring_order": null,
+      "stacking_calibrated": false
+    }
+  },
+  "uart": {
+    "enabled": false,
+    "device": "/dev/ttyS4",
+    "baudrate": 115200,
+    "pins": {
+      "A21": "UART4_TX",
+      "A22": "UART4_RX"
+    }
+  }
+}

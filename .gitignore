@@ -1,0 +1,26 @@
+# Python 缓存与本机虚拟环境
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# 原始参考仓库、临时依赖和验证输出保留在本机
+/references/
+/tmp/
+/captures/
+/maixcam2_vision/captures/
+*.jsonl
+
+# 本机配置与应用打包产物
+.env
+.env.*
+!.env.example
+.vscode/
+.idea/
+build/
+dist/
+*.tmp
+Thumbs.db
+.DS_Store
