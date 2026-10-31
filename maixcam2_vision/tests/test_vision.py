@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import types
 import unittest
 from unittest.mock import patch
@@ -18,13 +19,13 @@ import cv2
 import numpy as np
 
 from maixcam2_vision.calibrate import calibrate, parse_args
-from maixcam2_vision.camera_io import ImagePipeline, MaixSource, DesktopQR, load_frame
+from maixcam2_vision.camera_io import Frame, ImagePipeline, MaixSource, load_frame
 from maixcam2_vision.detectors.colors import load_color_config, make_all_color_masks, estimate_ranges
 from maixcam2_vision.detectors.material_pickup_detector import MaterialPickupDetector
 from maixcam2_vision.engine import VisionEngine
 from maixcam2_vision.main import main, save_snapshot
 from maixcam2_vision.settings import DEFAULT_CONFIG_DIR, load_settings, read_json, save_json
-from maixcam2_vision.steps.step01_qrcode import QRStep
+from maixcam2_vision.steps import step01_task
 from maixcam2_vision.steps.step02_turntable import build_detector as turntable_detector
 from maixcam2_vision.steps.step04_station import build_detector as ring_detector
 from maixcam2_vision.task import Task
@@ -114,19 +115,49 @@ class TaskWorkflowTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             workflow.set_mode("rings")
 
-    def test_qr_consecutive_frames_and_conflicts(self):
-        qr = QRStep(3)
-        self.assertIsNone(qr.process([TASK])[0])
-        qr.process([])
-        self.assertIsNone(qr.process([TASK])[0])
-        self.assertIsNone(qr.process([TASK])[0])
-        self.assertEqual(qr.process([TASK])[0].text, TASK)
-        self.assertIsNone(qr.process([TASK, "123+123+321+321"])[0])
-        self.assertEqual(qr.count, 0)
-        self.assertIsNone(qr.process(["123+123+321+321"], Task.parse(TASK))[0])
+    def test_external_input_is_optional_and_keeps_existing_task_interface(self):
+        workflow = Workflow()
+        self.assertIsNone(step01_task.read_external_task())
+        self.assertFalse(step01_task.process(workflow)[0])
+        self.assertIsNone(workflow.task)
+        with patch.object(step01_task, "read_external_task", return_value=TASK):
+            self.assertTrue(step01_task.process(workflow)[0])
+        self.assertEqual(workflow.task, Task.parse(TASK))
+        # 接收入口返回 None 表示本轮没有新报文，已经锁定的任务仍保留。
+        self.assertTrue(step01_task.process(workflow)[0])
+        self.assertEqual(workflow.step, 1)
+
+    def test_received_task_is_locked_even_before_leaving_step_one(self):
+        workflow = Workflow(1, TASK)
+        original_generation = workflow.generation
+        with patch.object(step01_task, "read_external_task", return_value=TASK):
+            step01_task.process(workflow)
+        self.assertEqual(workflow.generation, original_generation)
+        with patch.object(step01_task, "read_external_task", return_value="123+123+321+321"):
+            with self.assertRaises(ValueError):
+                step01_task.process(workflow)
+        self.assertEqual(workflow.task.text, TASK)
+        workflow.restart()
+        with patch.object(step01_task, "read_external_task", return_value="123+123+321+321"):
+            step01_task.process(workflow)
+        self.assertEqual(workflow.task.text, "123+123+321+321")
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_optional_set_task_still_uses_same_validation_and_lock(self):
+        workflow = Workflow()
+        ack = apply_command(workflow, {"command": "set_task", "task": TASK, "id": 1})
+        self.assertTrue(ack["ok"])
+        self.assertEqual(ack["task"], TASK)
+        self.assertEqual(workflow.step, 1)
+        generation = workflow.generation
+        apply_command(workflow, {"command": "set_task", "task": TASK})
+        self.assertEqual(workflow.generation, generation)
+        with self.assertRaises(ValueError):
+            apply_command(workflow, {"command": "set_task", "task": "123+123+321+321"})
+        apply_command(workflow, {"command": "next"})
+        self.assertEqual(workflow.step, 2)
+
     def test_fragmented_utf8_and_multiple_commands(self):
         wire = encode_message({"command": "status", "id": "中文"}) + b'{"command":"retry"}\r\n'
         parser = LineParser()
@@ -401,12 +432,104 @@ class EngineTests(ConfigFixture):
         self.assertEqual(event["data"], {})
         self.assertGreaterEqual(event["age_ms"], 500)
 
-    def test_qr_never_advances_step(self):
-        engine = self.engine(1)
-        for _ in range(3):
-            event = engine.process(station_image(), engine.clock(), [TASK])
+    def test_waiting_for_external_task_needs_no_camera_or_observation_timeout(self):
+        now = [0.0]
+        workflow = Workflow()
+        engine = VisionEngine(self.config_dir, self.config, workflow,
+                              self.pipeline.signature, clock=lambda: now[0])
+        for moment in (0.0, 11.0, 100.0):
+            now[0] = moment
+            event = engine.process(None, None)
+            self.assertEqual(event["state"], "waiting_task")
+            self.assertFalse(event["ready"])
+            self.assertIsNone(event["task"])
+            self.assertIsNone(event["captured_ms"])
+            self.assertIsNone(event["age_ms"])
+
+    def test_external_task_is_ready_without_camera_and_never_advances_step(self):
+        workflow = Workflow()
+        engine = VisionEngine(self.config_dir, self.config, workflow, self.pipeline.signature)
+        with patch.object(step01_task, "read_external_task", return_value=TASK):
+            event = engine.process(None, None)
         self.assertTrue(event["ready"])
+        self.assertEqual(event["mode"], "task")
+        self.assertEqual(event["task"], TASK)
         self.assertEqual(event["step"], 1)
+        self.assertTrue(engine.process(None, None)["ready"])
+        # 进入原有第二批暂存步骤时，颜色→第一批同色位置的计划保持一致。
+        workflow.select(11)
+        self.assertEqual([p["storage_ring"] for p in workflow.describe()["plan"]], [1, 2, 3])
+
+    def test_bad_or_failed_receiver_does_not_replace_locked_task(self):
+        engine = self.engine(1)
+        generation = self.workflow.generation
+        for malformed in ("bad", b"452+321+254+312", {"task": TASK}, "123+123+321+321"):
+            with self.subTest(value=malformed):
+                with patch.object(step01_task, "read_external_task", return_value=malformed):
+                    event = engine.process(None, None)
+                self.assertEqual(event["state"], "task_error")
+                self.assertFalse(event["ready"])
+                self.assertEqual(event["task"], TASK)
+                self.assertEqual(self.workflow.generation, generation)
+        with patch.object(step01_task, "read_external_task", side_effect=OSError("链路断开")):
+            event = engine.process(None, None)
+        self.assertEqual(event["state"], "task_error")
+        self.assertTrue(engine.process(None, None)["ready"])
+
+    def test_task_retry_keeps_task_restart_clears_it(self):
+        engine = self.engine(1)
+        self.workflow.retry()
+        self.assertTrue(engine.process(None, None)["ready"])
+        self.workflow.restart()
+        event = engine.process(None, None)
+        self.assertEqual(event["state"], "waiting_task")
+        self.assertIsNone(event["task"])
+
+    def test_entry_waits_for_task_without_opening_camera(self):
+        output = io.StringIO()
+        with patch("maixcam2_vision.main.MaixSource", side_effect=AssertionError("任务阶段不应打开相机")):
+            with redirect_stdout(output):
+                result = main(["--config-dir", str(self.config_dir), "--frames", "1", "--no-display"])
+        self.assertEqual(result, 0)
+        event = json.loads(output.getvalue().splitlines()[-1])
+        self.assertEqual(event["state"], "waiting_task")
+        self.assertEqual(event["step"], 1)
+
+    def test_received_task_continues_into_original_vision_steps(self):
+        class Commands:
+            def __init__(self):
+                self.count = 0
+
+            def poll(self):
+                self.count += 1
+                return [{"command": "set_step", "step": 4}] if self.count == 2 else []
+
+            def send(self, message):
+                return True
+
+            def close(self):
+                pass
+
+        source = types.SimpleNamespace(
+            read=lambda: Frame(station_image(), time.monotonic()),
+            close=lambda: None,
+        )
+        output = io.StringIO()
+        with patch.object(step01_task, "read_external_task", return_value=TASK):
+            with patch("maixcam2_vision.main.NullTransport", return_value=Commands()):
+                with patch("maixcam2_vision.main.MaixSource", return_value=source) as camera:
+                    with redirect_stdout(output):
+                        result = main(["--config-dir", str(self.config_dir),
+                                       "--frames", "4", "--no-display"])
+        self.assertEqual(result, 0)
+        camera.assert_called_once()
+        events = [json.loads(line) for line in output.getvalue().splitlines()]
+        self.assertEqual(events[0]["step"], 1)
+        self.assertEqual(events[0]["task"], TASK)
+        self.assertTrue(events[0]["ready"])
+        self.assertEqual(events[-1]["step"], 4)
+        self.assertTrue(events[-1]["stable"])
+        self.assertEqual(events[-1]["task"], TASK)
 
     def test_input_size_must_match_configuration(self):
         with self.assertRaises(ValueError):
@@ -451,10 +574,10 @@ class EngineTests(ConfigFixture):
 
 
 class MaixAPITests(unittest.TestCase):
-    def test_camera_converts_rgb_to_bgr_and_native_qr(self):
+    def test_camera_converts_rgb_to_bgr_without_scanning(self):
         calls = []
-        picture = types.SimpleNamespace(find_qrcodes=lambda: [
-            types.SimpleNamespace(payload=lambda: TASK)])
+        # 只提供取图对象；不提供任何二维码 API，保证后续视觉不再调用扫码。
+        picture = object()
         fake = types.SimpleNamespace(
             camera=types.SimpleNamespace(Camera=lambda *args, **kwargs: types.SimpleNamespace(
                 read=lambda: picture, close=lambda: None)),
@@ -463,19 +586,10 @@ class MaixAPITests(unittest.TestCase):
         )
         with patch.dict(sys.modules, {"maix": fake}):
             source = MaixSource({"width": 1280, "height": 720, "fps": 30})
-            packet = source.read(True)
+            packet = source.read()
             source.close()
-        self.assertEqual(packet.qr_payloads, [TASK])
+        self.assertEqual(packet.bgr.shape, (720, 1280, 3))
         self.assertEqual(calls, [{"ensure_bgr": True, "copy": True}])
-
-    def test_desktop_qr_decodes_real_encoded_task(self):
-        if not hasattr(cv2, "QRCodeEncoder_create"):
-            self.skipTest("本地 OpenCV 没有二维码编码器")
-        code = cv2.QRCodeEncoder_create().encode(TASK)
-        code = cv2.copyMakeBorder(code, 5, 5, 5, 5, cv2.BORDER_CONSTANT, value=255)
-        code = cv2.resize(code, None, fx=10, fy=10, interpolation=cv2.INTER_NEAREST)
-        frame = cv2.cvtColor(code, cv2.COLOR_GRAY2BGR)
-        self.assertIn(TASK, DesktopQR().decode(frame))
 
 
 if __name__ == "__main__":

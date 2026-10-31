@@ -6,7 +6,6 @@
     "undistort": false,
     "calibration_file": "camera.yaml"
   },
-  "qr_confirmations": 3,
   "result_hz": 5,
   "observation_timeout_s": 10,
   "freshness_ms": 500,

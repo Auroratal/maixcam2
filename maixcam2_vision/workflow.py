@@ -16,7 +16,7 @@ class Stage:
 
 # 粗加工放下后还需要取回，因此把放置与取回分成独立步骤。
 STAGES = (
-    Stage(1, "扫码并显示任务", "QR CODE", "qr", 0),
+    Stage(1, "接收外部任务并显示", "TASK INPUT", "task", 0),
     Stage(2, "第一批：转盘对齐", "B1 TURNTABLE", "turntable", 1),
     Stage(3, "第一批：原料颜色与停稳识别", "B1 MATERIAL", "material", 1),
     Stage(4, "第一批：粗加工区放置对齐", "B1 ROUGH PLACE", "rings", 1, "rough"),
@@ -52,14 +52,14 @@ class Workflow:
         if type(step) is not int or not 1 <= step <= len(STAGES):
             raise ValueError("步骤编号应为 1~12")
         if step != 1 and self.task is None:
-            raise ValueError("请先扫码，或用 --task 载入调试任务")
+            raise ValueError("请先接收外部任务，或用 --task 载入调试任务")
         self.step = step
         self.mode_override = None
         self.generation += 1
 
     def set_task(self, text):
         task = Task.parse(text)
-        if self.step != 1 and task != self.task:
+        if self.task is not None and task != self.task:
             raise ValueError("更换任务前请 restart，避免混用两场任务")
         if task != self.task:
             self.task = task

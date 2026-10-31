@@ -20,7 +20,7 @@ import json
 import time
 
 import cv2
-from .camera_io import ImagePipeline, MaixSource, DesktopSource, StillSource, DesktopQR
+from .camera_io import ImagePipeline, MaixSource, DesktopSource, StillSource
 from .engine import VisionEngine
 from .settings import DEFAULT_CONFIG_DIR, load_settings, save_json
 from .transport import NullTransport, UARTTransport, apply_command, encode_message
@@ -36,7 +36,7 @@ def parse_args(argv=None):
     parser.add_argument("--task", help="调试时预设任务，例如 452+321+254+312")
     parser.add_argument("--device", default="0", help="电脑端相机编号")
     parser.add_argument("--image", type=Path, help="backend=image 时的原始输入图片")
-    parser.add_argument("--frames", type=int, help="处理帧数上限；图片模式默认 1 帧")
+    parser.add_argument("--frames", type=int, help="处理循环次数上限；图片模式默认 1 轮")
     parser.add_argument("--no-display", action="store_true", help="关闭预览，仍输出 JSON")
     parser.add_argument("--output-jsonl", type=Path, help="额外记录观测与命令结果")
     parser.add_argument("--snapshot-dir", type=Path, default=Path(__file__).with_name("captures"))
@@ -86,7 +86,7 @@ def run(args):
     if args.output_jsonl:
         args.output_jsonl.parent.mkdir(parents=True, exist_ok=True)
         log = args.output_jsonl.open("w", encoding="utf-8")
-    source, qr_decoder = None, None
+    source = None
     source_retry_s = 0.0
     last_emit_s = 0.0
     previous_state = None
@@ -132,7 +132,7 @@ def run(args):
                     notice, notice_until = "Action rejected - see log", time.monotonic()+2
 
             now = time.monotonic()
-            if source is None and now >= source_retry_s:
+            if workflow.mode != "task" and source is None and now >= source_retry_s:
                 try:
                     if args.backend == "maix":
                         source = MaixSource(config["camera"])
@@ -147,20 +147,23 @@ def run(args):
                     source_retry_s = now + 1
                     camera_error = str(error)
 
-            if source is None:
+            if workflow.mode == "task":
+                # 外部接收入口由第一步轮询，等待任务时无需打开相机。
+                if source:
+                    source.close()
+                    source = None
+                frame = None
+                event = engine.process(None, None)
+                frame_count += 1
+            elif source is None:
                 frame = None
                 event = engine.unavailable(camera_error)
             else:
                 try:
-                    packet = source.read(want_qr=workflow.mode == "qr")
+                    packet = source.read()
                     frame = packet.bgr if packet.processed else pipeline.process(packet.bgr)
                     last_capture_s = packet.captured_s
-                    payloads = packet.qr_payloads
-                    if workflow.mode == "qr" and payloads is None:
-                        if qr_decoder is None:
-                            qr_decoder = DesktopQR()
-                        payloads = qr_decoder.decode(frame)
-                    event = engine.process(frame, packet.captured_s, payloads)
+                    event = engine.process(frame, packet.captured_s)
                     frame_count += 1
                 except (ValueError, cv2.error) as error:
                     # 配置/算法失败时不报告旧坐标；重试可重新加载检测器。

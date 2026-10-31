@@ -25,8 +25,6 @@ def load_settings(config_dir=DEFAULT_CONFIG_DIR):
         value = config[key]
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
             raise ValueError(f"{key} 必须是有限正数")
-    if type(config["qr_confirmations"]) is not int or config["qr_confirmations"] < 1:
-        raise ValueError("qr_confirmations 应为正整数")
     for area in ("rough", "storage"):
         order = config["areas"][area]["ring_order"]
         if order is not None and (

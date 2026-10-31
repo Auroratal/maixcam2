@@ -15,7 +15,6 @@ from .detectors.stacked_ring_detector import camera_geometry_signature
 class Frame:
     bgr: object
     captured_s: float
-    qr_payloads: object = None
     processed: bool = False
 
 
@@ -81,12 +80,11 @@ class MaixSource:
             image.Format.FMT_RGB888, fps=camera_config["fps"],
         )
 
-    def read(self, want_qr=False):
+    def read(self):
         img = self.camera.read()
         captured_s = time.monotonic()
-        payloads = [code.payload() for code in img.find_qrcodes()] if want_qr else None
         bgr = self.image.image2cv(img, ensure_bgr=True, copy=True)
-        return Frame(bgr, captured_s, payloads)
+        return Frame(bgr, captured_s)
 
     def close(self):
         close = getattr(self.camera, "close", None)
@@ -108,7 +106,7 @@ class DesktopSource:
             self.close()
             raise OSError(f"无法打开电脑相机 {device}")
 
-    def read(self, want_qr=False):
+    def read(self):
         ok, frame = self.camera.read()
         if not ok:
             raise OSError("摄像头未返回新画面")
@@ -124,21 +122,8 @@ class StillSource:
     def __init__(self, path, pipeline):
         self.frame = load_frame(path, pipeline)
 
-    def read(self, want_qr=False):
+    def read(self):
         return Frame(self.frame.copy(), time.monotonic(), processed=True)
 
     def close(self):
         pass
-
-
-class DesktopQR:
-    def __init__(self):
-        self.detector = cv2.QRCodeDetector()
-
-    def decode(self, frame):
-        # 优先多码解码，避免画面里出现两个任务码时任意选取。
-        ok, payloads, _, _ = self.detector.detectAndDecodeMulti(frame)
-        if ok:
-            return [text for text in payloads if text]
-        payload, _, _ = self.detector.detectAndDecode(frame)
-        return [payload] if payload else []

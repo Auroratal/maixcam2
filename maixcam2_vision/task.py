@@ -1,4 +1,4 @@
-"""第一步：校验二维码，推导两批物料的搬运计划。"""
+"""校验外部输入的任务码，推导两批物料的搬运计划。"""
 
 from dataclasses import dataclass
 
@@ -13,7 +13,7 @@ class Task:
 
     @classmethod
     def parse(cls, text):
-        # 只接受比赛规定的 ASCII 数字与加号，避免误收其他二维码。
+        # 只接受比赛规定的 ASCII 数字与加号，不把错误报文当成任务。
         if not isinstance(text, str) or len(text) != 15:
             raise ValueError("任务码应为四组三位数，例如 452+321+254+312")
         groups = text.split("+")

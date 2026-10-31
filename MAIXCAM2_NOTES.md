@@ -17,7 +17,7 @@
 
 已学习的视觉参考工程：`references/cyqm_vision_gongxun`。源码解析、串口协议、合成图验证及 MaixCAM2 适配事项见 `CYQM_VISION_STUDY.md`。
 
-2026-10-31：已新增 `maixcam2_vision/`，入口 `main.py`。默认独立运行，使用 Maix 相机与扫码接口，按比赛顺序分为 12 步；没有原 F407 主控通信依赖，另提供可选 JSON 行协议。使用与标定顺序见 `maixcam2_vision/README.md`。电脑测试已覆盖流程和合成图算法，尚未上板验证。
+2026-10-31：已新增 `maixcam2_vision/`，入口 `main.py`。按用户确认，扫码由外部设备完成；步骤 01 使用 `steps/step01_task.py` 的可替换接收函数，传输方式待定。步骤 02 起使用 Maix 相机运行视觉，整体按比赛顺序分为 12 步；没有原 F407 主控通信依赖，另提供可选 JSON 行协议。使用与标定顺序见 `maixcam2_vision/README.md`。电脑测试已覆盖流程和合成图算法，尚未上板验证。
 
 ## 1. 平台与硬件
 
